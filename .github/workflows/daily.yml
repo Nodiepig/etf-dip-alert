@@ -1,0 +1,66 @@
+name: ETF 大跌警報
+
+on:
+  schedule:
+    # GitHub cron 一律使用 UTC。01:00 UTC = 09:00 台北時間。
+    # 週二～週六（UTC）對應台北的週二～週六早上，剛好涵蓋週一～週五的收盤。
+    # 注意：GitHub 忙碌時排程可能延遲數分鐘到半小時，這對本用途無妨。
+    - cron: "0 1 * * 2-6"
+
+  # 允許在 Actions 頁面手動按按鈕執行（測試用）
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "強制發送通知（無視門檻）"
+        type: boolean
+        default: false
+      dry_run:
+        description: "只看結果，不發通知"
+        type: boolean
+        default: false
+
+# 需要寫入權限才能把 state.json 存回 repo
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 取出程式碼
+        uses: actions/checkout@v4
+
+      - name: 安裝 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安裝套件
+        run: pip install -r requirements.txt
+
+      - name: 執行檢查
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        run: |
+          ARGS=""
+          if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          python3 check_etf.py $ARGS
+
+      - name: 保存狀態
+        # 即使前一步失敗也要嘗試保存，避免狀態遺失導致重複通知
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain data/state.json)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add data/state.json
+            git commit -m "更新警報狀態 $(date -u +%Y-%m-%d)"
+            git push
+          else
+            echo "狀態沒有變化，不需要提交"
+          fi

@@ -1,0 +1,38 @@
+{
+  "tickers": [
+    {
+      "name": "VOO",
+      "label": "Vanguard S&P 500 ETF",
+      "currency": "USD",
+      "symbol_prefix": "$",
+      "stooq": "voo.us",
+      "yahoo": "VOO",
+      "news_query": "S&P 500 selloff"
+    },
+    {
+      "name": "0050",
+      "label": "元大台灣50",
+      "currency": "TWD",
+      "symbol_prefix": "NT$",
+      "stooq": "0050.tw",
+      "yahoo": "0050.TW",
+      "news_query": "台股 大跌"
+    }
+  ],
+
+  "ma_window": 200,
+
+  "tiers": [
+    { "key": "watch",  "threshold": -10.0, "emoji": "🟡", "name": "留意" },
+    { "key": "buy",    "threshold": -15.0, "emoji": "🟠", "name": "進場區" },
+    { "key": "deep",   "threshold": -25.0, "emoji": "🔴", "name": "深跌區" }
+  ],
+
+  "_comment_repeat": "已經在同一級別內，最多幾天重複提醒一次。設 0 表示只在升級時通知。",
+  "repeat_reminder_days": 7,
+
+  "_comment_stale": "抓到的最新收盤日距今超過幾天就在通知裡標註警告",
+  "stale_days": 5,
+
+  "notify_on_recovery": true
+}
