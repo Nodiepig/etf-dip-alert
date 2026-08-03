@@ -1,3 +1,13 @@
 {
-  "tickers": {}
+  "tickers": {
+    "VOO": {
+      "tier": null,
+      "last_notified": null
+    },
+    "0050": {
+      "tier": null,
+      "last_notified": null
+    }
+  },
+  "last_run": "2026-08-03"
 }
