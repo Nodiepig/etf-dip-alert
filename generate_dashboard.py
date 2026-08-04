@@ -15,8 +15,11 @@ CHART_W, CHART_H = 700, 250
 PAD_L, PAD_R, PAD_T, PAD_B = 54, 14, 14, 24
 
 GAUGE_HI, GAUGE_LO = 30.0, -40.0
-GAUGE_W, GAUGE_H = 700, 56
-BAR_Y, BAR_H, GPAD = 22, 11, 12
+GAUGE_W, GAUGE_H = 700, 70
+# BAR_Y 必須留出指針標籤的高度：標籤基線在 BAR_Y-18，字高 11px，
+# 所以 BAR_Y 至少要 32 才不會讓文字被 viewBox 上緣切掉。
+BAR_Y, BAR_H, GPAD = 34, 11, 12
+LABEL_MARGIN = 32   # 指針標籤的水平安全邊界，避免貼邊時左右被切
 
 
 def _window(closes: list[float], window: int, days: int):
@@ -46,9 +49,11 @@ def _polyline(values: list[float], lo: float, hi: float, n: int) -> str:
 
 
 def _chart_svg(series, cfg: dict, ticker_cfg: dict) -> str:
+    # 畫 level 1 的門檻線——那是你第一次收到通知的價位，比 level 2 更有參考價值。
+    # 三個級別的位置在上方的刻度尺已經看得到了。
     ma_win = cfg["ma_window"]
-    ma_th = min(t["threshold"] for t in cfg["ma_tiers"] if t["level"] == 2)
-    dd_th = min(t["threshold"] for t in cfg["drawdown_tiers"] if t["level"] == 2)
+    ma_th = min(t["threshold"] for t in cfg["ma_tiers"] if t["level"] == 1)
+    dd_th = min(t["threshold"] for t in cfg["drawdown_tiers"] if t["level"] == 1)
 
     prices, mas, highs = _window(series.closes, ma_win, CHART_DAYS)
     if not prices:
@@ -91,8 +96,8 @@ def _chart_svg(series, cfg: dict, ticker_cfg: dict) -> str:
   <span><i class="sw price"></i>收盤價</span>
   <span><i class="sw high"></i>52 週高</span>
   <span><i class="sw ma"></i>MA{ma_win}</span>
-  <span><i class="sw ddtrig"></i>回撤門檻 {dd_th:.0f}%</span>
-  <span><i class="sw matrig"></i>乖離門檻 {ma_th:.0f}%</span>
+  <span><i class="sw ddtrig"></i>回撤通知線 {dd_th:.0f}%</span>
+  <span><i class="sw matrig"></i>乖離通知線 {ma_th:.0f}%</span>
 </div>"""
 
 
@@ -111,6 +116,8 @@ def _gauge_svg(value: float, tiers: list[dict], label: str) -> str:
         )
 
     cx = x_of(value)
+    # 標籤置中對齊指針，但不能貼到左右邊緣，否則文字會被切掉
+    label_x = max(LABEL_MARGIN, min(cx, GAUGE_W - LABEL_MARGIN))
     clamped = value < GAUGE_LO or value > GAUGE_HI
     gid = f"g{abs(hash(label)) % 10000}"
 
@@ -128,26 +135,27 @@ def _gauge_svg(value: float, tiers: list[dict], label: str) -> str:
   {''.join(marks)}
   <polygon points="{cx:.1f},{BAR_Y - 5} {cx - 5:.1f},{BAR_Y - 14} {cx + 5:.1f},{BAR_Y - 14}"
            class="needle"/>
-  <text x="{cx:.1f}" y="{BAR_Y - 18}" class="needlelabel">{value:+.1f}%{'!' if clamped else ''}</text>
+  <text x="{label_x:.1f}" y="{BAR_Y - 18}" class="needlelabel">{value:+.1f}%{'!' if clamped else ''}</text>
 </svg></div>"""
 
 
 def _card(a, series, cfg: dict, ticker_cfg: dict) -> str:
     p = ticker_cfg["symbol_prefix"]
-    ma_th = min(t["threshold"] for t in cfg["ma_tiers"] if t["level"] == 2)
-    dd_th = min(t["threshold"] for t in cfg["drawdown_tiers"] if t["level"] == 2)
+    # 用 level 1 算「距離第一則通知還有多遠」——那才是你真正會先碰到的線
+    ma_th = min(t["threshold"] for t in cfg["ma_tiers"] if t["level"] == 1)
+    dd_th = min(t["threshold"] for t in cfg["drawdown_tiers"] if t["level"] == 1)
 
     ma_trigger = a.ma * (1 + ma_th / 100.0)
     dd_trigger = a.high_52w * (1 + dd_th / 100.0)
-    nearest = max(ma_trigger, dd_trigger)   # 比較先碰到的那條
+    nearest = max(ma_trigger, dd_trigger)   # 兩條線中比較高的那條會先被碰到
     which = "回撤" if dd_trigger >= ma_trigger else "乖離"
     gap = (nearest - a.price) / a.price * 100.0
 
     if a.triggered:
         gap_text = f"目前狀態：<strong>{a.status_text}</strong>"
     else:
-        gap_text = (f"還要再跌 <strong>{abs(gap):.1f}%</strong>（到約 {p}{nearest:,.2f}）"
-                    f"才會碰到{which}門檻")
+        gap_text = (f"再跌 <strong>{abs(gap):.1f}%</strong>（到約 {p}{nearest:,.2f}）"
+                    f"就會收到第一則通知，由{which}指標觸發")
 
     badge_cls = f"lv{a.level}" if a.triggered else "lv0"
     refmark = '<span class="ref">僅供參考</span>' if not a.notify else ""
