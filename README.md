@@ -72,7 +72,19 @@ git push -u origin main
 
 這是為了讓 Actions 能把 `data/state.json` 寫回 repo——這個檔案記錄「上次通知到哪個級別」，沒有它就無法避免重複通知。
 
-### 4. 測試一次
+### 4. 開啟 GitHub Pages
+
+**Settings → Pages**：
+
+- Source 選 **Deploy from a branch**
+- Branch 選 **main**，資料夾選 **/docs**
+- Save
+
+網址會是 `https://nodiepig.github.io/etf-dip-alert/`。第一次要等幾分鐘才會生效。
+
+（頁面第一次執行後才會產生內容，所以先做完下一步再來看。）
+
+### 5. 測試一次
 
 到 **Actions** 分頁 → 左邊選「ETF 大跌警報」→ 右邊 **Run workflow**：
 

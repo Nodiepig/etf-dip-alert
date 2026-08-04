@@ -51,16 +51,16 @@ jobs:
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           python3 check_etf.py $ARGS
 
-      - name: 保存狀態
+      - name: 保存狀態與更新看板
         # 即使前一步失敗也要嘗試保存，避免狀態遺失導致重複通知
         if: always()
         run: |
-          if [ -n "$(git status --porcelain data/state.json)" ]; then
-            git config user.name  "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add data/state.json
-            git commit -m "更新警報狀態 $(date -u +%Y-%m-%d)"
-            git push
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/state.json docs/index.html
+          if git diff --cached --quiet; then
+            echo "沒有變化，不需要提交"
           else
-            echo "狀態沒有變化，不需要提交"
+            git commit -m "更新狀態與看板 $(date -u +%Y-%m-%d)"
+            git push
           fi

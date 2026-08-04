@@ -14,17 +14,19 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import alert_logic
 import fetch_prices
+import generate_dashboard
 import news
 from notify_line import send_line_message
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_FILE = BASE_DIR / "config.json"
 STATE_FILE = BASE_DIR / "data" / "state.json"
+DASHBOARD_FILE = BASE_DIR / "docs" / "index.html"
 
 TRADING_DAYS_1M = 21
 TRADING_DAYS_3M = 63
@@ -52,7 +54,8 @@ def save_state(state: dict) -> None:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
-def assess(cfg: dict, ticker_cfg: dict, today: date) -> alert_logic.Assessment:
+def assess(cfg: dict, ticker_cfg: dict, today: date):
+    """回傳 (評估結果, 價格序列)。序列給看板畫圖用。"""
     series = fetch_prices.fetch(ticker_cfg)
     window = cfg["ma_window"]
 
@@ -76,7 +79,7 @@ def assess(cfg: dict, ticker_cfg: dict, today: date) -> alert_logic.Assessment:
         a.tier_name = tier["name"]
         a.tier_emoji = tier["emoji"]
 
-    return a
+    return a, series
 
 
 def format_line(a: alert_logic.Assessment, ticker_cfg: dict) -> str:
@@ -165,11 +168,14 @@ def main() -> int:
     today = date.today()
 
     assessments: list[alert_logic.Assessment] = []
+    series_map: dict = {}
     failures: list[str] = []
 
     for ticker_cfg in cfg["tickers"]:
         try:
-            assessments.append(assess(cfg, ticker_cfg, today))
+            a, series = assess(cfg, ticker_cfg, today)
+            assessments.append(a)
+            series_map[a.name] = series
         except Exception as e:  # noqa: BLE001
             failures.append(f"{ticker_cfg['name']}: {e}")
             print(f"[error] {ticker_cfg['name']} 評估失敗：{e}", file=sys.stderr)
@@ -184,6 +190,17 @@ def main() -> int:
         print(f"  {a.name}: 現價 {a.price:,.2f} / MA200 {a.ma:,.2f} / "
               f"乖離 {a.deviation:+.2f}% / 級別 {a.tier_name or '未觸發'} "
               f"/ 收盤日 {a.latest_date} / 來源 {a.source}")
+
+    # 看板每次都重新產生，不管有沒有觸發通知——它的用途就是讓你隨時能查
+    try:
+        DASHBOARD_FILE.parent.mkdir(parents=True, exist_ok=True)
+        html_out = generate_dashboard.build_html(
+            assessments, series_map, cfg, datetime.now(timezone.utc)
+        )
+        DASHBOARD_FILE.write_text(html_out, encoding="utf-8")
+        print(f"[dashboard] 已產生 {DASHBOARD_FILE.relative_to(BASE_DIR)}")
+    except Exception as e:  # noqa: BLE001 — 看板失敗不該影響通知
+        print(f"[dashboard] 產生失敗（不影響通知）：{e}", file=sys.stderr)
 
     decision = alert_logic.decide(
         assessments=assessments,
