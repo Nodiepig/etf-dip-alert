@@ -1,4 +1,5 @@
 {
+  "_comment_notify": "notify=false 的標的照樣計算並顯示在看板上，但不會觸發 LINE 通知",
   "tickers": [
     {
       "name": "VOO",
@@ -7,7 +8,8 @@
       "symbol_prefix": "$",
       "stooq": "voo.us",
       "yahoo": "VOO",
-      "news_query": "S&P 500 selloff"
+      "news_query": "S&P 500 selloff",
+      "notify": true
     },
     {
       "name": "0050",
@@ -16,20 +18,45 @@
       "symbol_prefix": "NT$",
       "stooq": "0050.tw",
       "yahoo": "0050.TW",
-      "news_query": "台股 大跌"
+      "news_query": "台股 大跌",
+      "notify": true
+    },
+    {
+      "name": "QQQ",
+      "label": "Invesco Nasdaq-100 ETF（僅供參考，不發通知）",
+      "currency": "USD",
+      "symbol_prefix": "$",
+      "stooq": "qqq.us",
+      "yahoo": "QQQ",
+      "news_query": "Nasdaq selloff",
+      "notify": false
     }
   ],
 
   "ma_window": 200,
+  "high_window": 252,
 
-  "tiers": [
-    { "key": "watch",  "threshold": -10.0, "emoji": "🟡", "name": "留意" },
-    { "key": "buy",    "threshold": -15.0, "emoji": "🟠", "name": "進場區" },
-    { "key": "deep",   "threshold": -25.0, "emoji": "🔴", "name": "深跌區" }
+  "_comment_levels": "兩組指標共用 level 1/2/3 的嚴重度刻度，取較嚴重者作為整體級別",
+
+  "_comment_ma": "指標一：現價相對 200 日均線的乖離率。抓「相對長期平均變便宜」，對急跌敏感，對陰跌遲鈍。",
+  "ma_tiers": [
+    { "key": "ma_watch", "level": 1, "threshold": -10.0, "emoji": "🟡", "name": "留意" },
+    { "key": "ma_buy",   "level": 2, "threshold": -15.0, "emoji": "🟠", "name": "進場區" },
+    { "key": "ma_deep",  "level": 3, "threshold": -25.0, "emoji": "🔴", "name": "深跌區" }
+  ],
+
+  "_comment_dd": "指標二：現價距 52 週最高收盤價的回撤幅度。這才是直覺上的「從高點跌下來多少」，補上均線的落後性。",
+  "drawdown_tiers": [
+    { "key": "dd_correction", "level": 1, "threshold": -10.0, "emoji": "🟡", "name": "修正" },
+    { "key": "dd_bear",       "level": 2, "threshold": -20.0, "emoji": "🟠", "name": "熊市" },
+    { "key": "dd_severe",     "level": 3, "threshold": -30.0, "emoji": "🔴", "name": "重挫" }
   ],
 
   "_comment_repeat": "已經在同一級別內，最多幾天重複提醒一次。設 0 表示只在升級時通知。",
   "repeat_reminder_days": 7,
+
+  "_comment_buffer": "遲滯緩衝（百分點）。已在警戒中時，要回升到門檻上方這麼多才算脫離。防止價格在門檻邊緣震盪造成反覆通知——回測顯示沒有這個機制的話，同一波行情會產生近十次通知。",
+  "recovery_buffer": 3.0,
 
   "_comment_stale": "抓到的最新收盤日距今超過幾天就在通知裡標註警告",
   "stale_days": 5,

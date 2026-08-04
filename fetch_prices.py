@@ -67,6 +67,24 @@ class PriceSeries:
             return None
         return (self.closes[-1] - past) / past * 100.0
 
+    def high_over(self, trading_days: int) -> float:
+        """
+        最近 N 個交易日的最高「收盤價」。
+
+        注意這裡用收盤價而不是盤中最高價，因為資料來源只保證收盤價可靠。
+        這會讓回撤幅度略微低估（真正的高點通常出現在盤中），但一致性比精確度重要——
+        現價也是收盤價，兩者用同一個基準比較才有意義。
+        """
+        window = self.closes[-trading_days:] if trading_days < len(self.closes) else self.closes
+        return max(window)
+
+    def drawdown_pct(self, trading_days: int) -> float:
+        """現價距最近 N 個交易日最高收盤價的回撤幅度（%）。負值代表低於高點。"""
+        high = self.high_over(trading_days)
+        if high <= 0:
+            raise FetchError(f"{self.name}: 高點價格異常")
+        return (self.latest_close - high) / high * 100.0
+
 
 def _sanity_check(name: str, dates: list[date], closes: list[float]) -> None:
     """

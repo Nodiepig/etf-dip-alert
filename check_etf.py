@@ -2,7 +2,11 @@
 """
 ETF 大跌警報 — 主程式
 
-每個交易日檢查追蹤標的是否明顯跌破 200 日均線，觸發門檻才發 LINE 通知。
+每個交易日檢查追蹤標的是否明顯下跌，觸發門檻才發 LINE 通知，並更新 GitHub Pages 看板。
+
+兩個指標任一達標就觸發：
+    · 均線乖離：現價相對 200 日均線
+    · 高點回撤：現價相對 52 週最高收盤價
 
 用法：
     python3 check_etf.py              # 正常執行
@@ -14,7 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import alert_logic
@@ -57,50 +61,49 @@ def save_state(state: dict) -> None:
 def assess(cfg: dict, ticker_cfg: dict, today: date):
     """回傳 (評估結果, 價格序列)。序列給看板畫圖用。"""
     series = fetch_prices.fetch(ticker_cfg)
-    window = cfg["ma_window"]
+    ma_win, hi_win = cfg["ma_window"], cfg["high_window"]
 
-    deviation = series.deviation_pct(window)
-    tier = alert_logic.classify(deviation, cfg["tiers"])
+    deviation = series.deviation_pct(ma_win)
+    drawdown = series.drawdown_pct(hi_win)
+    buf = cfg["recovery_buffer"]
 
-    a = alert_logic.Assessment(
+    return alert_logic.Assessment(
         name=ticker_cfg["name"],
         price=series.latest_close,
-        ma=series.sma(window),
-        deviation=deviation,
         latest_date=series.latest_date,
         source=series.source,
+        notify=ticker_cfg.get("notify", True),
+        ma=series.sma(ma_win),
+        deviation=deviation,
+        ma_tier=alert_logic.classify(deviation, cfg["ma_tiers"]),
+        high_52w=series.high_over(hi_win),
+        drawdown=drawdown,
+        dd_tier=alert_logic.classify(drawdown, cfg["drawdown_tiers"]),
+        hold_ma_tier=alert_logic.classify(deviation, cfg["ma_tiers"], buf),
+        hold_dd_tier=alert_logic.classify(drawdown, cfg["drawdown_tiers"], buf),
         change_1m=series.pct_change_over(TRADING_DAYS_1M),
         change_3m=series.pct_change_over(TRADING_DAYS_3M),
         stale=(today - series.latest_date).days > cfg["stale_days"],
-    )
-
-    if tier:
-        a.tier_key = tier["key"]
-        a.tier_name = tier["name"]
-        a.tier_emoji = tier["emoji"]
-
-    return a, series
+    ), series
 
 
 def format_line(a: alert_logic.Assessment, ticker_cfg: dict) -> str:
     p = ticker_cfg["symbol_prefix"]
+    tag = "" if a.notify else "（參考）"
     return (
-        f"{a.name}  現價 {p}{a.price:,.2f}｜MA200 {p}{a.ma:,.2f}｜"
-        f"乖離 {a.deviation:+.1f}% {a.tier_emoji}"
+        f"{a.name}{tag} {p}{a.price:,.2f} {a.emoji}\n"
+        f"  回撤 {a.drawdown:+.1f}%（52週高 {p}{a.high_52w:,.2f}）\n"
+        f"  乖離 {a.deviation:+.1f}%（MA200 {p}{a.ma:,.2f}）"
     )
 
 
-def build_message(
-    decision: alert_logic.Decision,
-    cfg: dict,
-    today: date,
-) -> str:
+def build_message(decision: alert_logic.Decision, cfg: dict) -> str:
     by_name = {t["name"]: t for t in cfg["tickers"]}
-    triggered = [a for a in decision.assessments if a.triggered]
+    triggered = [a for a in decision.assessments if a.triggered and a.notify]
 
     if triggered:
-        worst = min(triggered, key=lambda a: a.deviation)
-        header = f"{worst.tier_emoji} {worst.name} {worst.tier_name}訊號"
+        worst = max(triggered, key=lambda a: a.level)
+        header = f"{worst.emoji} {worst.name} {worst.status_text}訊號"
     elif decision.recovered:
         header = f"✅ {'、'.join(decision.recovered)} 已脫離警戒區"
     else:
@@ -112,12 +115,17 @@ def build_message(
     lines.append("")
 
     for a in triggered:
-        detail = f"{a.name} 已跌破 200 日均線 {abs(a.deviation):.1f}%，落在{a.tier_name}。"
+        bits = []
+        if a.dd_tier:
+            bits.append(f"距 52 週高點跌 {abs(a.drawdown):.1f}%（{a.dd_tier['name']}）")
+        if a.ma_tier:
+            bits.append(f"低於 200 日均線 {abs(a.deviation):.1f}%（{a.ma_tier['name']}）")
+        detail = f"{a.name} " + "，".join(bits) + "。"
         moves = []
         if a.change_1m is not None:
-            moves.append(f"近一個月 {a.change_1m:+.1f}%")
+            moves.append(f"近一月 {a.change_1m:+.1f}%")
         if a.change_3m is not None:
-            moves.append(f"近三個月 {a.change_3m:+.1f}%")
+            moves.append(f"近三月 {a.change_3m:+.1f}%")
         if moves:
             detail += "（" + "、".join(moves) + "）"
         lines.append(detail)
@@ -128,15 +136,16 @@ def build_message(
         seen: set[str] = set()
         for a in triggered:
             tcfg = by_name[a.name]
-            is_zh = tcfg["currency"] == "TWD"
-            for item in news.fetch_headlines(tcfg["news_query"], chinese=is_zh, limit=3):
+            for item in news.fetch_headlines(
+                tcfg["news_query"], chinese=(tcfg["currency"] == "TWD"), limit=3
+            ):
                 if item["link"] in seen:
                     continue
                 seen.add(item["link"])
                 src = f"（{item['source']}）" if item["source"] else ""
                 lines.append(f"• {item['title']}{src}")
                 lines.append(f"  {item['link']}")
-        if len(seen) == 0:
+        if not seen:
             lines.append("（這次沒抓到相關新聞）")
         lines.append("")
         lines.append("※ 標題未經查證，請自行判讀。跌幅大不一定有單一原因，"
@@ -187,17 +196,21 @@ def main() -> int:
         return 1
 
     for a in assessments:
-        print(f"  {a.name}: 現價 {a.price:,.2f} / MA200 {a.ma:,.2f} / "
-              f"乖離 {a.deviation:+.2f}% / 級別 {a.tier_name or '未觸發'} "
-              f"/ 收盤日 {a.latest_date} / 來源 {a.source}")
+        flag = "" if a.notify else " [僅參考]"
+        print(f"  {a.name}{flag}: {a.price:,.2f} | "
+              f"回撤 {a.drawdown:+.2f}% (52週高 {a.high_52w:,.2f}) | "
+              f"乖離 {a.deviation:+.2f}% (MA200 {a.ma:,.2f}) | "
+              f"{a.status_text} | {a.latest_date} | {a.source}")
 
     # 看板每次都重新產生，不管有沒有觸發通知——它的用途就是讓你隨時能查
     try:
         DASHBOARD_FILE.parent.mkdir(parents=True, exist_ok=True)
-        html_out = generate_dashboard.build_html(
-            assessments, series_map, cfg, datetime.now(timezone.utc)
+        DASHBOARD_FILE.write_text(
+            generate_dashboard.build_html(
+                assessments, series_map, cfg, datetime.now(timezone.utc)
+            ),
+            encoding="utf-8",
         )
-        DASHBOARD_FILE.write_text(html_out, encoding="utf-8")
         print(f"[dashboard] 已產生 {DASHBOARD_FILE.relative_to(BASE_DIR)}")
     except Exception as e:  # noqa: BLE001 — 看板失敗不該影響通知
         print(f"[dashboard] 產生失敗（不影響通知）：{e}", file=sys.stderr)
@@ -205,12 +218,10 @@ def main() -> int:
     decision = alert_logic.decide(
         assessments=assessments,
         state=state,
-        tiers=cfg["tiers"],
         repeat_reminder_days=cfg["repeat_reminder_days"],
         notify_on_recovery=cfg["notify_on_recovery"],
         today=today,
     )
-
     print(f"[decision] {decision.reason}")
 
     if args.force:
@@ -222,8 +233,7 @@ def main() -> int:
             save_state(state)
         return 0
 
-    message = build_message(decision, cfg, today)
-
+    message = build_message(decision, cfg)
     if failures:
         message += "\n\n⚠️ 部分標的抓不到資料：" + "；".join(failures)
 
