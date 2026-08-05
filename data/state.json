@@ -1,13 +1,17 @@
 {
   "tickers": {
     "VOO": {
-      "tier": null,
+      "level": 0,
       "last_notified": null
     },
     "0050": {
-      "tier": null,
+      "level": 0,
+      "last_notified": null
+    },
+    "QQQ": {
+      "level": 0,
       "last_notified": null
     }
   },
-  "last_run": "2026-08-04"
+  "last_run": "2026-08-05"
 }
